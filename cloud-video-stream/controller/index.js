@@ -98,23 +98,73 @@ exports.controller = async (req, res) => {
 
         switch (event) {
             case "upload":
-
-                // upload video
-                token = jwt.sign({CLERK_CLIENT_ID, event}, JWT_SECRET, {expiresIn: '30m'});
-
-
-                return res.json({token});
-
+                // Upload video
+                try {
+                    const { userId } = req.auth; // Assuming userId comes from authenticated user
+                    const fileSizeMB = req.file.size / (1024 * 1024); // Calculate file size in MB
+            
+                    // Check usage before proceeding with upload
+                    const usageResponse = await fetch('http://localhost:8081/usage', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ userId, fileSizeMB }),
+                    });
+            
+                    const usageData = await usageResponse.json();
+            
+                    // If the response from the usage API indicates that the limit is exceeded, throw an error
+                    if (usageData.response !== 0) {
+                        return res.status(400).json({
+                            error: `Upload limit exceeded. Current usage: ${usageData.response}`,
+                        });
+                    }
+            
+                    // Now, proceed with file upload if usage check passes
+                    const formData = new FormData();
+                    formData.append("file", req.file); // Assuming `req.file` contains the file to be uploaded
+                    formData.append("clerk_client_id", CLERK_CLIENT_ID); // Adding client ID as part of the form data
+            
+                    const uploadResponse = await fetch('http://localhost:8081/upload', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'multipart/form-data',
+                        },
+                        body: formData,
+                    });
+            
+                    if (!uploadResponse.ok) {
+                        throw new Error(`Upload API error: ${uploadResponse.statusText}`);
+                    }
+            
+                    const uploadResponseData = await uploadResponse.json();
+                    if (uploadResponseData.error) {
+                        throw new Error(`Failed to upload: ${uploadResponseData.error}`);
+                    }
+            
+                    // Return the generated token and upload response
+                    return res.json({
+                        token,
+                        uploadResult: uploadResponseData, // Include the upload response (e.g., fileId)
+                    });
+            
+                } catch (err) {
+                    console.error("Error processing upload:", err);
+                    return res.status(500).json({ error: "Failed to process upload" });
+                }
                 break;
+            
+
             case "get-all-videos":
                 // get all videos
 
                 // Log start of operation
-                logEvent("get-all-videos", "pending", CLERK_CLIENT_ID)
-                    .catch(err => console.log("Warning: Logging failed:", err.message));
+                // logEvent("get-all-videos", "pending", CLERK_CLIENT_ID)
+                //     .catch(err => console.log("Warning: Logging failed:", err.message));
 
-                const response = await fetch(`https://storage-microservice-796253357501.us-central1.run.app/all_name?name=${CLERK_CLIENT_ID}`, {
-                // const response = await fetch(`http://localhost:8080/all_name?name=${CLERK_CLIENT_ID}`, {
+                // const response = await fetch(`https://storage-microservice-796253357501.us-central1.run.app/all_name?name=${CLERK_CLIENT_ID}`, {
+                const response = await fetch(`http://localhost:8080/all_name?name=${CLERK_CLIENT_ID}`, {
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json',
@@ -206,11 +256,38 @@ exports.controller = async (req, res) => {
                 
                 
                 break;
-            case "stream":
-                // stream video
-                token = jwt.sign({CLERK_CLIENT_ID, event}, JWT_SECRET, {expiresIn: '60m'});
-                return res.json({token});
-                break;
+                case "stream":
+                    // Stream video
+                    try {
+                        const response = await fetch(`http://localhost:8081/stream?fileName=${body.fileName}`);
+                        if (!response.ok) {
+                            throw new Error(`Error: ${response.statusText}`);
+                        }
+                
+                        const data = await response.json();
+                        if (data.signedUrl) {
+                            console.log('Stream URL:', data.signedUrl);
+                
+                            // Send back the signed URL as a response
+                            return {
+                                status: "success",
+                                signedUrl: data.signedUrl
+                            };
+                        } else {
+                            console.error('Error: No signed URL received');
+                            return {
+                                status: "error",
+                                message: "No signed URL received from the server."
+                            };
+                        }
+                    } catch (err) {
+                        console.error('Error streaming video:', err);
+                        return {
+                            status: "error",
+                            message: `Failed to fetch signed URL: ${err.message}`
+                        };
+                    }
+                
 
             case "monitoring":
                 logEvent("request-resource-monitor", "success", CLERK_CLIENT_ID)
