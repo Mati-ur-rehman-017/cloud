@@ -51,7 +51,7 @@ const bucketName='granger01';
  */
 app.get('/all_name', async (req, res) => {
   const { name } = req.query;
-
+  console.log("here");
   if (!name) {
     return res.status(400).json({ error: 'Folder name is required' });
   }
